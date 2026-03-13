@@ -4,6 +4,7 @@ export * from './core/IRaftNode';
 export * from './core/RaftLog';
 export * from './dlt/DistributedLedger';
 export * from './dlt/dlt.types';
+export * from './dlt/ledger.contract';
 export * from './interfaces/INetworkAdapter';
 export * from './interfaces/IStorageAdapter';
 export * from './interfaces/ILogger';
