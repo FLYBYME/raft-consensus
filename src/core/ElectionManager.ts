@@ -12,10 +12,13 @@ export class ElectionManager {
         const peers = this.node.getPeers();
         const totalNodes = peers.length + 1;
         
-        if (totalNodes <= 1) {
-            return Math.floor(Math.random() * 500) + 500;
-        }
-        return Math.floor(Math.random() * (this.node.config.electionTimeoutMax - this.node.config.electionTimeoutMin)) + this.node.config.electionTimeoutMin;
+        const baseTimeout = totalNodes <= 1 
+            ? 500 
+            : Math.floor(Math.random() * (this.node.config.electionTimeoutMax - this.node.config.electionTimeoutMin)) + this.node.config.electionTimeoutMin;
+        
+        // Add extra jitter (50-250ms) to prevent synchronization in browser/high-latency environments
+        const jitter = Math.floor(Math.random() * 200) + 50;
+        return baseTimeout + jitter;
     }
 
     resetElectionTimer(): void {
