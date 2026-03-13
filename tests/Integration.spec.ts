@@ -77,10 +77,13 @@ describe('Raft Integration (10 Tests)', () => {
             if (leader) {
                 clearInterval(check);
                 leader.propose('test', { val: 42 }).then(() => {
-                    setTimeout(() => {
-                        const allHaveIt = nodes.every(n => n.raftLog.getLastLogIndex() >= 1);
-                        if (allHaveIt) done();
-                    }, 1000);
+                    const checkRepl = setInterval(async () => {
+                        const indices = await Promise.all(nodes.map(n => n.raftLog.getLastLogIndex()));
+                        if (indices.every(idx => idx >= 1)) {
+                            clearInterval(checkRepl);
+                            done();
+                        }
+                    }, 100);
                 });
             }
         }, 500);
@@ -112,10 +115,14 @@ describe('Raft Integration (10 Tests)', () => {
             
             await leader.propose('ledger-test', { data: 'win' });
             
-            setTimeout(() => {
+            const checkLens = setInterval(() => {
                 const lens = nodes.map(n => n.getOrCreateLedger('ledger-test').getLength());
-                if (lens.every(l => l >= 1)) done();
-            }, 1500);
+                console.log('Lens:', lens);
+                if (lens.every(l => l >= 1)) {
+                    clearInterval(checkLens);
+                    done();
+                }
+            }, 500);
         }, 1000);
     }, 10000);
 
@@ -131,9 +138,13 @@ describe('Raft Integration (10 Tests)', () => {
             n3.config.isVoter = true;
             n3.start();
             
-            setTimeout(() => {
-                if (n3.raftLog.getLastLogIndex() >= 1) done();
-            }, 2000);
+            const checkSync = setInterval(async () => {
+                const idx = await n3.raftLog.getLastLogIndex();
+                if (idx >= 1) {
+                    clearInterval(checkSync);
+                    done();
+                }
+            }, 100);
         }, 1000);
     }, 10000);
 
@@ -160,9 +171,13 @@ describe('Raft Integration (10 Tests)', () => {
             
             for(let i=0; i<3; i++) await leader.propose('multi', { i });
             
-            setTimeout(() => {
-                if (nodes.every(n => n.raftLog.getLastLogIndex() >= 3)) done();
-            }, 2000);
+            const checkMulti = setInterval(async () => {
+                const indices = await Promise.all(nodes.map(n => n.raftLog.getLastLogIndex()));
+                if (indices.every(idx => idx >= 3)) {
+                    clearInterval(checkMulti);
+                    done();
+                }
+            }, 100);
         }, 1000);
     }, 10000);
 

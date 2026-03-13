@@ -84,10 +84,12 @@ describe('Raft Chaos & Partition Testing', () => {
             const originalLeader = nodes.find(n => n.state === RaftState.LEADER);
             expect(originalLeader).toBeDefined();
 
-            // 2. Create partition: Group A {1,2,3}, Group B {4,5}
+            // 2. Create partition: Group A (3 nodes), Group B (2 nodes including original leader)
             // Block all communication between Group A and Group B
-            const groupA = ['node-1', 'node-2', 'node-3'];
-            const groupB = ['node-4', 'node-5'];
+            const origId = originalLeader!.network.getNodeID();
+            const others = nodes.map(n => n.network.getNodeID()).filter(id => id !== origId);
+            const groupB = [origId, others[0]];
+            const groupA = [others[1], others[2], others[3]];
 
             adapters.forEach(a => {
                 if (groupA.includes(a.getNodeID())) {
@@ -102,8 +104,8 @@ describe('Raft Chaos & Partition Testing', () => {
                 const leaderA = nodes.filter(n => groupA.includes(n.network.getNodeID()) && n.state === RaftState.LEADER);
                 const leaderB = nodes.filter(n => groupB.includes(n.network.getNodeID()) && n.state === RaftState.LEADER);
 
-                expect(leaderA.length).toBe(1); // Group A should have a leader (quorum of 3)
-                expect(leaderB.length).toBe(0); // Group B should have NO leader (no quorum)
+                expect(leaderA.length).toBe(1); // Group A should have a new leader (quorum of 3)
+                expect(leaderB.length).toBe(1); // Group B retains the isolated old leader
 
                 // 4. Propose data in the majority partition
                 const activeLeader = leaderA[0];
