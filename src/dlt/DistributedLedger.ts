@@ -27,15 +27,19 @@ export class DistributedLedger<T = any, S = any> {
     }
 
     private async loadInitialState(): Promise<void> {
-        const row = await this.provider.get(
-            'SELECT tx_id, [index] FROM ledger_transactions WHERE namespace = ? ORDER BY [index] DESC LIMIT 1',
-            [this.namespace]
-        );
-        if (row) {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            this.head = (row as any).tx_id;
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            this.length = (row as any).index;
+        try {
+            const row = await this.provider.get(
+                'SELECT tx_id, [index] FROM ledger_transactions WHERE namespace = ? ORDER BY [index] DESC LIMIT 1',
+                [this.namespace]
+            );
+            if (row) {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                this.head = (row as any).tx_id;
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                this.length = (row as any).index;
+            }
+        } catch (err) {
+            // Ignore init errors if table doesn't exist yet
         }
     }
 
@@ -43,7 +47,7 @@ export class DistributedLedger<T = any, S = any> {
      * Append a new transaction to the local ledger.
      */
     async append(entry: LedgerEntry<T>): Promise<Transaction<T>> {
-        const deferred = new Promise<Transaction<T>>((resolve, reject) => {
+        return new Promise<Transaction<T>>((resolve, reject) => {
             this.writeQueue = this.writeQueue.then(async () => {
                 try {
                     // 1. Get current state from DB to avoid staleness across instances
@@ -82,12 +86,13 @@ export class DistributedLedger<T = any, S = any> {
 
                     resolve(tx);
                 } catch (err) {
+                    console.error(`[DLT] Append failed for ${this.namespace}:`, err);
                     reject(err);
                 }
+            }).catch(() => {
+                // Ensure queue continues even if previous promise was rejected
             });
         });
-
-        return deferred;
     }
 
     private writeQueue: Promise<void> = Promise.resolve();
@@ -96,33 +101,39 @@ export class DistributedLedger<T = any, S = any> {
      * Append an entry that already has an index and ID (from leader).
      */
     async appendLocally(tx: Transaction<T>): Promise<void> {
-        this.writeQueue = this.writeQueue.then(async () => {
-            try {
-                // 1. Check if index already exists to be idempotent
-                const existing = await this.provider.get(
-                    'SELECT tx_id FROM ledger_transactions WHERE namespace = ? AND [index] = ?',
-                    [this.namespace, tx.index]
-                );
+        const deferred = new Promise<void>((resolve, reject) => {
+            this.writeQueue = this.writeQueue.then(async () => {
+                try {
+                    // 1. Check if index already exists to be idempotent
+                    const existing = await this.provider.get(
+                        'SELECT tx_id FROM ledger_transactions WHERE namespace = ? AND [index] = ?',
+                        [this.namespace, tx.index]
+                    );
 
-                if (existing) {
-                    return;
+                    if (existing) {
+                        resolve();
+                        return;
+                    }
+
+                    await this.provider.run(
+                        'INSERT OR IGNORE INTO ledger_transactions ([index], namespace, tx_id, prev_tx_id, term, timestamp, node_id, payload) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                        [tx.index, this.namespace, tx.txID, tx.prevTxID, tx.term, tx.timestamp, tx.nodeID, JSON.stringify(tx.payload)]
+                    );
+
+                    this.head = tx.txID;
+                    this.length = Math.max(this.length, tx.index);
+                    resolve();
+                } catch (err: any) {
+                    console.error(`[DLT] Ledger write failed for index ${tx.index} in ${this.namespace}:`, err.message);
+                    // We resolve here to NOT break the queue, but the caller gets the rejection via the returned promise
+                    reject(err);
                 }
-
-                await this.provider.run(
-                    'INSERT OR IGNORE INTO ledger_transactions ([index], namespace, tx_id, prev_tx_id, term, timestamp, node_id, payload) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-                    [tx.index, this.namespace, tx.txID, tx.prevTxID, tx.term, tx.timestamp, tx.nodeID, JSON.stringify(tx.payload)]
-                );
-
-                this.head = tx.txID;
-                this.length = Math.max(this.length, tx.index);
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            } catch (err: any) {
-                console.error(`[DLT] Ledger write failed for index ${tx.index} in ${this.namespace}`, { error: err.message });
-                throw err;
-            }
+            }).catch(() => {
+                // Catch-all to keep the serial queue alive
+            });
         });
 
-        return this.writeQueue;
+        return deferred;
     }
 
     /**
@@ -162,11 +173,15 @@ export class DistributedLedger<T = any, S = any> {
      */
     async compact(upToIndex: number): Promise<void> {
         this.writeQueue = this.writeQueue.then(async () => {
-            await this.provider.run(
-                'DELETE FROM ledger_transactions WHERE [index] < ? AND namespace = ?',
-                [upToIndex, this.namespace]
-            );
-        });
+            try {
+                await this.provider.run(
+                    'DELETE FROM ledger_transactions WHERE [index] < ? AND namespace = ?',
+                    [upToIndex, this.namespace]
+                );
+            } catch (err) {
+                console.error(`[DLT] Compact failed for ${this.namespace}:`, err);
+            }
+        }).catch(() => {});
         return this.writeQueue;
     }
 
