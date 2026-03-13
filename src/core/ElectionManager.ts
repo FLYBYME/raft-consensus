@@ -10,8 +10,6 @@ export class ElectionManager {
 
     getElectionTimeout(): number {
         const peers = this.node.getPeers();
-        // Include self in count? Usually peers list excludes self, but for cluster size we need total.
-        // Assuming getPeers returns OTHER nodes.
         const totalNodes = peers.length + 1;
         
         if (totalNodes <= 1) {
@@ -21,21 +19,6 @@ export class ElectionManager {
     }
 
     resetElectionTimer(): void {
-        // We need access to the timer references on the node, but they are not in IRaftNode yet.
-        // Let's assume we manage them here or expose them on IRaftNode.
-        // For better encapsulation, let's keep them here? No, node needs to clear them on state change.
-        // I'll add them to IRaftNode or just cast as any for now to match legacy structure, 
-        // but better to add to IRaftNode.
-        // Let's add them to IRaftNode interface in next step if needed, or just use `any`.
-        // Actually, let's look at IRaftNode again. I missed timers.
-        
-        // Refactoring: The node should probably hold the timers, or the manager should fully manage them.
-        // The original code had `this.state.electionTimer`.
-        // Let's stick to `IRaftNode` having them for now to minimize drift.
-        // I'll update IRaftNode later to include timers if strictness fails.
-        // For now, I'll cast `node` to `any` for timers to proceed quickly, or add to interface.
-        // Adding to interface is cleaner.
-        
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const nodeAny = this.node as any;
 
@@ -64,8 +47,8 @@ export class ElectionManager {
         const args: RequestVoteArgs = {
             term: this.node.currentTerm,
             candidateId: this.node.network.getNodeID(),
-            lastLogIndex: this.node.raftLog.getLastLogIndex(),
-            lastLogTerm: this.node.raftLog.getLastLogTerm(),
+            lastLogIndex: await this.node.raftLog.getLastLogIndex(),
+            lastLogTerm: await this.node.raftLog.getLastLogTerm(),
             isPreVote: true
         };
 
@@ -82,7 +65,7 @@ export class ElectionManager {
         this.node.state = RaftState.CANDIDATE;
         this.node.currentTerm++;
         this.node.votedFor = this.node.network.getNodeID();
-        this.node.persistState();
+        await this.node.persistState();
         this.node.votesReceived = new Set([this.node.network.getNodeID()]);
         this.resetElectionTimer();
 
@@ -101,8 +84,8 @@ export class ElectionManager {
         const args: RequestVoteArgs = {
             term: this.node.currentTerm,
             candidateId: this.node.network.getNodeID(),
-            lastLogIndex: this.node.raftLog.getLastLogIndex(),
-            lastLogTerm: this.node.raftLog.getLastLogTerm(),
+            lastLogIndex: await this.node.raftLog.getLastLogIndex(),
+            lastLogTerm: await this.node.raftLog.getLastLogTerm(),
             isPreVote: false
         };
 

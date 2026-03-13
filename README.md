@@ -6,6 +6,7 @@ A standalone, framework-agnostic implementation of the Raft Consensus Algorithm 
 
 - **Leader Election**: Automated candidate transitions and term management.
 - **Log Replication**: Reliable log consistency across a distributed cluster.
+- **Durability**: Fully asynchronous log persistence ensuring consistency on crash/recovery.
 - **Distributed Ledger (DLT)**: Built-in support for immutable transaction chains.
 - **Framework Agnostic**: Decoupled from any specific networking or storage engine via interfaces.
 - **Strictly Typed**: Zero `any` usage for maximum reliability.

@@ -24,8 +24,8 @@ export class RaftRPCManager {
         }
 
         // 2. Log completeness check
-        const localLastLogIndex = this.node.raftLog.getLastLogIndex();
-        const localLastLogTerm = this.node.raftLog.getLastLogTerm();
+        const localLastLogIndex = await this.node.raftLog.getLastLogIndex();
+        const localLastLogTerm = await this.node.raftLog.getLastLogTerm();
         const logIsUpToDate = (args.lastLogTerm > localLastLogTerm) ||
             (args.lastLogTerm === localLastLogTerm && args.lastLogIndex >= localLastLogIndex);
 
@@ -90,9 +90,7 @@ export class RaftRPCManager {
 
         // Log Consistency Check
         if (args.prevLogIndex > 0) {
-            const localTerm = this.node.raftLog.getTerm(args.prevLogIndex);
-            // If localTerm is 0, it means entry doesn't exist (index out of bounds), so mismatch.
-            // If localTerm != args.prevLogTerm, mismatch.
+            const localTerm = await this.node.raftLog.getTerm(args.prevLogIndex);
             if (localTerm !== args.prevLogTerm) {
                 this.logger.debug(`[Raft] Log consistency check failed for ${senderID}. PrevIndex: ${args.prevLogIndex}, LocalTerm: ${localTerm}, ArgsTerm: ${args.prevLogTerm}`);
                 return reply;
@@ -100,35 +98,32 @@ export class RaftRPCManager {
         }
 
         // 3. Log conflict resolution: Delete mismatched suffix
-        // We iterate through entries provided by leader. If we have an entry at that index but term differs, we truncate from there.
         for (const entry of args.entries) {
-            const existingTerm = this.node.raftLog.getTerm(entry.index);
+            const existingTerm = await this.node.raftLog.getTerm(entry.index);
             if (existingTerm !== 0 && existingTerm !== entry.term) {
                 this.logger.warn(`[Raft] Log conflict detected at index ${entry.index}. Local term ${existingTerm}, leader term ${entry.term}. Truncating log.`);
-                this.node.raftLog.truncateSuffix(entry.index);
+                await this.node.raftLog.truncateSuffix(entry.index);
                 break;
             }
         }
 
         // 4. Append any new entries not already in the log
-        // If we didn't truncate, we might still have entries that match. We only append what we don't have.
-        // Or if we truncated, we append everything from that point.
-        // Simple logic: filter entries where getTerm(index) == 0 (meaning they don't exist).
-        // Since we already handled conflicts, existing entries MUST match terms.
-        const newEntries = args.entries.filter(e => this.node.raftLog.getTerm(e.index) === 0);
+        const newEntries = [];
+        for (const e of args.entries) {
+            if (await this.node.raftLog.getTerm(e.index) === 0) {
+                newEntries.push(e);
+            }
+        }
+        
         if (newEntries.length > 0) {
             this.logger.debug(`[Raft] Appending ${newEntries.length} new entries to log.`);
-            this.node.raftLog.append(newEntries);
+            await this.node.raftLog.append(newEntries);
         }
 
         // 5. Update commit index
         if (args.leaderCommit > this.node.commitIndex) {
             const oldCommit = this.node.commitIndex;
-            // Leader commit might be higher than our last log index if we are catching up.
-            // Commit index is min(leaderCommit, index of last new entry).
-            // Actually, Raft paper says: min(leaderCommit, index of last new entry) is for *request*.
-            // The standard is min(leaderCommit, lastLogIndex).
-            this.node.commitIndex = Math.min(args.leaderCommit, this.node.raftLog.getLastLogIndex());
+            this.node.commitIndex = Math.min(args.leaderCommit, await this.node.raftLog.getLastLogIndex());
             if (this.node.commitIndex > oldCommit) {
                 this.logger.debug(`[Raft] Commit index advanced from ${oldCommit} to ${this.node.commitIndex}`);
                 await this.node.applyCommitted();
@@ -136,9 +131,6 @@ export class RaftRPCManager {
         }
 
         reply.success = true;
-        // Optimization: return the last index we have, so leader can update nextIndex efficiently?
-        // Standard Raft just returns success.
-        // Original code: reply.matchIndex = args.prevLogIndex + args.entries.length;
         reply.matchIndex = args.prevLogIndex + args.entries.length;
         
         return reply;

@@ -27,7 +27,7 @@ export class ReplicationManager {
     async sendAppendEntriesToPeer(peerID: string): Promise<void> {
         const nextIdx = this.node.nextIndex.get(peerID) || 1;
         const prevLogIndex = nextIdx - 1;
-        const prevLogTerm = this.node.raftLog.getTerm(prevLogIndex);
+        const prevLogTerm = await this.node.raftLog.getTerm(prevLogIndex);
 
         const entries = await this.node.raftLog.getEntriesFrom(nextIdx);
 
@@ -75,28 +75,20 @@ export class ReplicationManager {
     async advanceLeaderCommitIndex(): Promise<void> {
         const matchIndices = Array.from(this.node.matchIndex.values()) as number[];
         // Add self
-        matchIndices.push(this.node.raftLog.getLastLogIndex());
+        matchIndices.push(await this.node.raftLog.getLastLogIndex());
         matchIndices.sort((a: number, b: number) => b - a);
 
         const peers = this.node.getPeers();
         const totalNodes = peers.length + 1;
-        const quorumIndex = Math.floor(totalNodes / 2); // 0-based index for majority?
-        // If 3 nodes: quorum size is 2. matchIndices has 3 items. 
-        // We want item at index that represents (N/2)+1'th largest.
-        // Sorted desc: [100, 100, 50]. 3 nodes. Majority is 2.
-        // Index 0: 100 (1 node)
-        // Index 1: 100 (2 nodes) -> This is the majority index.
-        // Index 2: 50 (3 nodes)
-        // If 5 nodes. Majority 3. Index 2.
-        // So index is floor(N/2).
+        const quorumIndex = Math.floor(totalNodes / 2);
         
         const majorityMatchIndex = matchIndices[quorumIndex];
 
         if (majorityMatchIndex === undefined) return;
 
-        if (majorityMatchIndex > this.node.commitIndex && this.node.raftLog.getTerm(majorityMatchIndex) === this.node.currentTerm) {
+        if (majorityMatchIndex > this.node.commitIndex && await this.node.raftLog.getTerm(majorityMatchIndex) === this.node.currentTerm) {
             this.node.commitIndex = majorityMatchIndex;
-            const entry = this.node.raftLog.getEntry(this.node.commitIndex);
+            const entry = await this.node.raftLog.getEntry(this.node.commitIndex);
             await this.node.applyCommitted();
             this.node.network.broadcast({
                 topic: 'commit',

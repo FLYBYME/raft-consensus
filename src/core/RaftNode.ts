@@ -101,8 +101,8 @@ export class RaftNode extends EventEmitter implements IRaftNode {
         this.peers = new Set(peers);
     }
 
-    public persistState(): void {
-        this.storage.run('UPDATE raft_state SET current_term = ?, voted_for = ? WHERE id = 1', [this.currentTerm, this.votedFor]);
+    public async persistState(): Promise<void> {
+        await this.storage.run('UPDATE raft_state SET current_term = ?, voted_for = ? WHERE id = 1', [this.currentTerm, this.votedFor]);
     }
 
     private registerHandlers(): void {
@@ -117,10 +117,6 @@ export class RaftNode extends EventEmitter implements IRaftNode {
         });
 
         this.network.on('vote-res', (msg: RaftMessage) => {
-             // We need to implement handleVoteResponse in RaftNode or delegate?
-             // ConsensusModule had `handleVoteResponse` which called `becomeLeader`.
-             // ElectionManager manages `becomeCandidate`.
-             // But `handleVoteResponse` logic is tied to state transition.
              this.handleVoteResponse(msg.data, msg.senderNodeID);
         });
 
@@ -146,7 +142,7 @@ export class RaftNode extends EventEmitter implements IRaftNode {
         this.votedFor = null;
         this.currentLeaderID = null;
         this.isReadyEmitted = false;
-        this.persistState();
+        this.persistState(); // Fire and forget or await? RAFT says we should persist before proceeding.
         
         if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
         this.resetElectionTimer();
@@ -209,7 +205,7 @@ export class RaftNode extends EventEmitter implements IRaftNode {
              this.emit('ready', { leaderID: this.network.getNodeID(), term: this.currentTerm });
         }
 
-        const lastLogIndex = this.raftLog.getLastLogIndex();
+        const lastLogIndex = await this.raftLog.getLastLogIndex();
         const peers = this.getPeers();
         for (const peer of peers) {
              this.nextIndex.set(peer, lastLogIndex + 1);
@@ -223,21 +219,17 @@ export class RaftNode extends EventEmitter implements IRaftNode {
     public async applyCommitted(): Promise<void> {
         while (this.lastApplied < this.commitIndex) {
             this.lastApplied++;
-            const entry = this.raftLog.getEntry(this.lastApplied);
+            const entry = await this.raftLog.getEntry(this.lastApplied);
             if (entry) {
                 const ledger = this.ledgers.get(entry.namespace);
                 if (ledger) {
                     // eslint-disable-next-line @typescript-eslint/no-explicit-any
                     const tx: any = {
-                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
                         txID: (entry as any).id || (entry as any).txID || `temp-${entry.index}-${entry.term}`,
-                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
                         prevTxID: (entry as any).prevID || (entry as any).prevTxID || null,
                         index: entry.index,
                         term: entry.term,
-                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
                         timestamp: (entry as any).timestamp || Date.now(),
-                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
                         nodeID: (entry as any).nodeID || 'unknown',
                         payload: entry.payload
                     };
@@ -261,12 +253,12 @@ export class RaftNode extends EventEmitter implements IRaftNode {
     public async propose(namespace: string, payload: any): Promise<boolean> {
         if (this.state !== RaftState.LEADER) return false;
 
-        const newIndex = this.raftLog.getLastLogIndex() + 1;
+        const newIndex = await this.raftLog.getLastLogIndex() + 1;
         const entry: LogEntry = { term: this.currentTerm, index: newIndex, namespace, payload };
 
         this.logger.debug('Proposing new entry', { namespace, index: newIndex });
 
-        this.raftLog.append([entry]);
+        await this.raftLog.append([entry]);
         this.matchIndex.set(this.network.getNodeID(), newIndex);
         
         this.replicationManager.sendAppendEntriesToAll();
