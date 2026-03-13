@@ -58,13 +58,11 @@ export class RaftNode extends EventEmitter implements IRaftNode {
 
     async start(): Promise<void> {
         // Load persistent state
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const stateRow = await this.storage.get('SELECT current_term, voted_for FROM raft_state WHERE id = 1') as any;
+        const stateRow = await this.storage.get('SELECT current_term, voted_for FROM raft_state WHERE id = 1');
         if (stateRow) {
-            this.currentTerm = stateRow.current_term;
-            this.votedFor = stateRow.voted_for;
+            this.currentTerm = (stateRow as any).current_term;
+            this.votedFor = (stateRow as any).voted_for;
         } else {
-             // Initialize state table if needed or just handle empty
              await this.storage.run('CREATE TABLE IF NOT EXISTS raft_state (id INTEGER PRIMARY KEY, current_term INTEGER, voted_for TEXT)');
              await this.storage.run('INSERT OR IGNORE INTO raft_state (id, current_term, voted_for) VALUES (1, 0, NULL)');
         }
@@ -133,6 +131,20 @@ export class RaftNode extends EventEmitter implements IRaftNode {
         this.network.on('append-res', (msg: RaftMessage) => {
              this.replicationManager.handleAppendResponse(msg.data, msg.senderNodeID);
         });
+
+        this.network.on('snapshot-req', async (msg: RaftMessage) => {
+            const reply = await this.rpcManager.handleInstallSnapshot(msg.data, msg.senderNodeID);
+            this.network.send(msg.senderNodeID, {
+                topic: 'snapshot-res',
+                data: reply,
+                senderNodeID: this.network.getNodeID(),
+                meta: msg.meta
+            });
+        });
+
+        this.network.on('snapshot-res', (msg: RaftMessage) => {
+            this.replicationManager.handleInstallSnapshotResponse(msg.data, msg.senderNodeID);
+        });
     }
 
     public stepDown(term: number): void {
@@ -142,7 +154,7 @@ export class RaftNode extends EventEmitter implements IRaftNode {
         this.votedFor = null;
         this.currentLeaderID = null;
         this.isReadyEmitted = false;
-        this.persistState(); // Fire and forget or await? RAFT says we should persist before proceeding.
+        this.persistState();
         
         if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
         this.resetElectionTimer();
@@ -223,7 +235,6 @@ export class RaftNode extends EventEmitter implements IRaftNode {
             if (entry) {
                 const ledger = this.ledgers.get(entry.namespace);
                 if (ledger) {
-                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
                     const tx: any = {
                         txID: (entry as any).id || (entry as any).txID || `temp-${entry.index}-${entry.term}`,
                         prevTxID: (entry as any).prevID || (entry as any).prevTxID || null,
@@ -242,14 +253,12 @@ export class RaftNode extends EventEmitter implements IRaftNode {
                          });
                     });
                 }
-                // Emit commit event
                 this.emit(`commit:${entry.namespace}`, { entry });
                 this.emit('commit', { entry });
             }
         }
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     public async propose(namespace: string, payload: any): Promise<boolean> {
         if (this.state !== RaftState.LEADER) return false;
 
@@ -263,7 +272,6 @@ export class RaftNode extends EventEmitter implements IRaftNode {
         
         this.replicationManager.sendAppendEntriesToAll();
         
-        // If single node cluster (1 node total = 0 peers)
         if (this.getPeers().length === 0) {
              await this.replicationManager.advanceLeaderCommitIndex();
         }
@@ -271,7 +279,6 @@ export class RaftNode extends EventEmitter implements IRaftNode {
         return true;
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     public getOrCreateLedger<T = any>(namespace: string): DistributedLedger<T> {
         if (!this.ledgers.has(namespace)) {
             const ledger = new DistributedLedger<T>(namespace, this.storage);
@@ -280,7 +287,6 @@ export class RaftNode extends EventEmitter implements IRaftNode {
         return this.ledgers.get(namespace)! as DistributedLedger<T>;
     }
     
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     public registerLedger(ledger: DistributedLedger<any>): void {
         this.ledgers.set(ledger.namespace, ledger);
     }

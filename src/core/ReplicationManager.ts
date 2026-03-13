@@ -1,6 +1,6 @@
 import { ILogger } from '../interfaces/ILogger';
 import { IRaftNode } from './IRaftNode';
-import { RaftState, AppendEntriesArgs, AppendEntriesReply } from './raft.types';
+import { RaftState, AppendEntriesArgs, AppendEntriesReply, InstallSnapshotArgs, InstallSnapshotReply } from './raft.types';
 
 export class ReplicationManager {
     constructor(
@@ -26,9 +26,29 @@ export class ReplicationManager {
 
     async sendAppendEntriesToPeer(peerID: string): Promise<void> {
         const nextIdx = this.node.nextIndex.get(peerID) || 1;
+        const snapshot = await this.node.raftLog.getLatestSnapshot();
+
+        // If the follower needs logs that we've already compacted, send the snapshot
+        if (snapshot && nextIdx <= snapshot.last_index) {
+            this.logger.info(`[Raft] Follower ${peerID} is too far behind. Sending InstallSnapshot.`);
+            const args: InstallSnapshotArgs = {
+                term: this.node.currentTerm,
+                leaderId: this.node.network.getNodeID(),
+                lastIncludedIndex: snapshot.last_index,
+                lastIncludedTerm: snapshot.last_term,
+                data: snapshot.data
+            };
+
+            this.node.network.send(peerID, {
+                topic: 'snapshot-req',
+                data: args,
+                senderNodeID: this.node.network.getNodeID()
+            }).catch(() => { });
+            return;
+        }
+
         const prevLogIndex = nextIdx - 1;
         const prevLogTerm = await this.node.raftLog.getTerm(prevLogIndex);
-
         const entries = await this.node.raftLog.getEntriesFrom(nextIdx);
 
         const args: AppendEntriesArgs = {
@@ -72,14 +92,33 @@ export class ReplicationManager {
         }
     }
 
+    /**
+     * Handles response to InstallSnapshot RPC.
+     */
+    handleInstallSnapshotResponse(reply: InstallSnapshotReply, senderID: string): void {
+        if (this.node.state !== RaftState.LEADER) return;
+
+        if (reply.term > this.node.currentTerm) {
+            this.node.stepDown(reply.term);
+            return;
+        }
+
+        // Now that they have the snapshot, update their nextIndex to start *after* it
+        this.node.raftLog.getLatestSnapshot().then(snapshot => {
+            if (snapshot) {
+                this.node.matchIndex.set(senderID, snapshot.last_index);
+                this.node.nextIndex.set(senderID, snapshot.last_index + 1);
+                this.sendAppendEntriesToPeer(senderID); // Resume normal log replication
+            }
+        });
+    }
+
     async advanceLeaderCommitIndex(): Promise<void> {
         const matchIndices = Array.from(this.node.matchIndex.values()) as number[];
-        // Add self
         matchIndices.push(await this.node.raftLog.getLastLogIndex());
         matchIndices.sort((a: number, b: number) => b - a);
 
-        const peers = this.node.getPeers();
-        const totalNodes = peers.length + 1;
+        const totalNodes = this.node.getPeers().length + 1;
         const quorumIndex = Math.floor(totalNodes / 2);
         
         const majorityMatchIndex = matchIndices[quorumIndex];

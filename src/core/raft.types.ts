@@ -40,3 +40,15 @@ export interface AppendEntriesReply {
     success: boolean;
     matchIndex: number;
 }
+
+export interface InstallSnapshotArgs {
+    term: number;
+    leaderId: string;
+    lastIncludedIndex: number;
+    lastIncludedTerm: number;
+    data: any; 
+}
+
+export interface InstallSnapshotReply {
+    term: number;
+}

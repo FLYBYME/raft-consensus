@@ -1,6 +1,6 @@
 import { ILogger } from '../interfaces/ILogger';
 import { IRaftNode } from './IRaftNode';
-import { RaftState, RequestVoteArgs, RequestVoteReply, AppendEntriesArgs, AppendEntriesReply } from './raft.types';
+import { RaftState, RequestVoteArgs, RequestVoteReply, AppendEntriesArgs, AppendEntriesReply, InstallSnapshotArgs, InstallSnapshotReply } from './raft.types';
 
 export class RaftRPCManager {
     constructor(
@@ -40,7 +40,7 @@ export class RaftRPCManager {
                 this.logger.info(`[Raft] Granting vote to ${args.candidateId} for term ${this.node.currentTerm}`);
                 reply.voteGranted = true;
                 this.node.votedFor = args.candidateId;
-                this.node.persistState();
+                await this.node.persistState();
                 
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 const nodeAny = this.node as any;
@@ -77,7 +77,6 @@ export class RaftRPCManager {
 
         this.node.currentLeaderID = args.leaderId;
         if (this.node.state !== RaftState.FOLLOWER) {
-            this.logger.info(`[Raft] Recognized leader ${args.leaderId} for term ${this.node.currentTerm}. Switching to FOLLOWER.`);
             this.node.state = RaftState.FOLLOWER;
             this.node.emit('state-changed', { newState: RaftState.FOLLOWER, term: this.node.currentTerm });
         }
@@ -133,6 +132,46 @@ export class RaftRPCManager {
         reply.success = true;
         reply.matchIndex = args.prevLogIndex + args.entries.length;
         
+        return reply;
+    }
+
+    /**
+     * Handles InstallSnapshot RPC from leader.
+     */
+    async handleInstallSnapshot(args: InstallSnapshotArgs, senderID: string): Promise<InstallSnapshotReply> {
+        this.logger.debug(`[Raft] Received InstallSnapshot from ${senderID} (term: ${args.term})`);
+
+        const reply: InstallSnapshotReply = { term: this.node.currentTerm };
+
+        if (args.term < this.node.currentTerm) {
+            return reply;
+        }
+
+        if (args.term > this.node.currentTerm) {
+            this.node.stepDown(args.term);
+        }
+
+        // Reset election timer and acknowledge leader
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const nodeAny = this.node as any;
+        if (nodeAny.electionManager) nodeAny.electionManager.resetElectionTimer();
+        this.node.currentLeaderID = args.leaderId;
+        if (this.node.state !== RaftState.FOLLOWER) {
+            this.node.state = RaftState.FOLLOWER;
+            this.node.emit('state-changed', { newState: RaftState.FOLLOWER, term: this.node.currentTerm });
+        }
+
+        // Save the snapshot to the local disk
+        await this.node.raftLog.createSnapshot(args.lastIncludedIndex, args.lastIncludedTerm, args.data);
+
+        // If existing log entries overlap with the snapshot, delete them
+        await this.node.raftLog.compact(args.lastIncludedIndex);
+
+        // Fast-forward commit index
+        this.node.commitIndex = Math.max(this.node.commitIndex, args.lastIncludedIndex);
+        this.node.lastApplied = Math.max(this.node.lastApplied, args.lastIncludedIndex);
+
+        reply.term = this.node.currentTerm;
         return reply;
     }
 }
