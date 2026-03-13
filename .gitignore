@@ -1,0 +1,25 @@
+# Dependency Directories
+node_modules/
+
+# Build Artifacts
+dist/
+*.tsbuildinfo
+
+# Test/Coverage reports
+coverage/
+.nyc_output/
+
+# Editor/IDE specific files
+.vscode/
+.idea/
+
+# Operating System Files
+.DS_Store
+Thumbs.db
+
+# Environment variables
+.env
+.env.*
+
+# Logs
+*.log
