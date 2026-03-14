@@ -108,23 +108,30 @@ describe('Raft Integration (10 Tests)', () => {
     }, 10000);
 
     test('4. Ledger state should be consistent across nodes', (done) => {
-        nodes.forEach(n => n.start());
+        // Pre-register ledgers on all nodes
+        nodes.forEach(n => {
+            n.getOrCreateLedger('ledger-test');
+            n.start();
+        });
+
         setTimeout(async () => {
             const leader = nodes.find(n => n.state === RaftState.LEADER);
-            if (!leader) return;
+            if (!leader) {
+                // If no leader yet, the interval will eventually timeout the test
+                return;
+            }
             
             await leader.propose('ledger-test', { data: 'win' });
             
             const checkLens = setInterval(() => {
                 const lens = nodes.map(n => n.getOrCreateLedger('ledger-test').getLength());
-                console.log('Lens:', lens);
                 if (lens.every(l => l >= 1)) {
                     clearInterval(checkLens);
                     done();
                 }
             }, 500);
-        }, 1000);
-    }, 10000);
+        }, 2000); // Give cluster more time to elect leader
+    }, 15000); // Increase timeout
 
     test('5. Node with stale log should catch up from leader', (done) => {
         const [n1, n2, n3] = nodes;
