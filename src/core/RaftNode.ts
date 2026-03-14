@@ -1,6 +1,6 @@
 import { EventEmitter } from 'eventemitter3';
 import { IRaftNode } from './IRaftNode';
-import { RaftState, LogEntry } from './raft.types';
+import { RaftState, LogEntry, RequestVoteArgs, RequestVoteReply, AppendEntriesArgs, AppendEntriesReply, InstallSnapshotArgs, InstallSnapshotReply } from './raft.types';
 import { INetworkAdapter, RaftMessage } from '../interfaces/INetworkAdapter';
 import { IStorageAdapter } from '../interfaces/IStorageAdapter';
 import { ILogger } from '../interfaces/ILogger';
@@ -60,8 +60,9 @@ export class RaftNode extends EventEmitter implements IRaftNode {
         // Load persistent state
         const stateRow = await this.storage.get('SELECT current_term, voted_for FROM raft_state WHERE id = 1');
         if (stateRow) {
-            this.currentTerm = (stateRow as any).current_term;
-            this.votedFor = (stateRow as any).voted_for;
+            const row = stateRow as { current_term: number, voted_for: string };
+            this.currentTerm = row.current_term;
+            this.votedFor = row.voted_for;
         } else {
              await this.storage.run('CREATE TABLE IF NOT EXISTS raft_state (id INTEGER PRIMARY KEY, current_term INTEGER, voted_for TEXT)');
              await this.storage.run('INSERT OR IGNORE INTO raft_state (id, current_term, voted_for) VALUES (1, 0, NULL)');
@@ -105,7 +106,7 @@ export class RaftNode extends EventEmitter implements IRaftNode {
 
     private registerHandlers(): void {
         this.network.on('vote-req', async (msg: RaftMessage) => {
-             const reply = await this.rpcManager.handleRequestVote(msg.data, msg.senderNodeID);
+             const reply = await this.rpcManager.handleRequestVote(msg.data as RequestVoteArgs, msg.senderNodeID);
              this.network.send(msg.senderNodeID, {
                  topic: 'vote-res',
                  data: reply,
@@ -115,11 +116,11 @@ export class RaftNode extends EventEmitter implements IRaftNode {
         });
 
         this.network.on('vote-res', (msg: RaftMessage) => {
-             this.handleVoteResponse(msg.data, msg.senderNodeID);
+             this.handleVoteResponse(msg.data as RequestVoteReply, msg.senderNodeID);
         });
 
         this.network.on('append-req', async (msg: RaftMessage) => {
-             const reply = await this.rpcManager.handleAppendEntries(msg.data, msg.senderNodeID);
+             const reply = await this.rpcManager.handleAppendEntries(msg.data as AppendEntriesArgs, msg.senderNodeID);
              this.network.send(msg.senderNodeID, {
                  topic: 'append-res',
                  data: reply,
@@ -129,11 +130,11 @@ export class RaftNode extends EventEmitter implements IRaftNode {
         });
 
         this.network.on('append-res', (msg: RaftMessage) => {
-             this.replicationManager.handleAppendResponse(msg.data, msg.senderNodeID);
+             this.replicationManager.handleAppendResponse(msg.data as AppendEntriesReply, msg.senderNodeID);
         });
 
         this.network.on('snapshot-req', async (msg: RaftMessage) => {
-            const reply = await this.rpcManager.handleInstallSnapshot(msg.data, msg.senderNodeID);
+            const reply = await this.rpcManager.handleInstallSnapshot(msg.data as InstallSnapshotArgs, msg.senderNodeID);
             this.network.send(msg.senderNodeID, {
                 topic: 'snapshot-res',
                 data: reply,
@@ -143,7 +144,7 @@ export class RaftNode extends EventEmitter implements IRaftNode {
         });
 
         this.network.on('snapshot-res', (msg: RaftMessage) => {
-            this.replicationManager.handleInstallSnapshotResponse(msg.data, msg.senderNodeID);
+            this.replicationManager.handleInstallSnapshotResponse(msg.data as InstallSnapshotReply, msg.senderNodeID);
         });
     }
 
@@ -175,7 +176,7 @@ export class RaftNode extends EventEmitter implements IRaftNode {
         this.electionManager.resetElectionTimer();
     }
 
-    private async handleVoteResponse(reply: any, senderID: string): Promise<void> {
+    private async handleVoteResponse(reply: RequestVoteReply, senderID: string): Promise<void> {
         if (this.state !== RaftState.CANDIDATE && this.state !== RaftState.PRE_CANDIDATE) return;
         
         if (reply.term > this.currentTerm) {
@@ -259,7 +260,7 @@ export class RaftNode extends EventEmitter implements IRaftNode {
         }
     }
 
-    public async propose(namespace: string, payload: any): Promise<boolean> {
+    public async propose(namespace: string, payload: unknown): Promise<boolean> {
         if (this.state !== RaftState.LEADER) return false;
 
         const newIndex = await this.raftLog.getLastLogIndex() + 1;
@@ -279,7 +280,7 @@ export class RaftNode extends EventEmitter implements IRaftNode {
         return true;
     }
 
-    public getOrCreateLedger<T = any>(namespace: string): DistributedLedger<T> {
+    public getOrCreateLedger<T = unknown>(namespace: string): DistributedLedger<T> {
         if (!this.ledgers.has(namespace)) {
             const ledger = new DistributedLedger<T>(namespace, this.storage);
             this.ledgers.set(namespace, ledger);
@@ -287,7 +288,7 @@ export class RaftNode extends EventEmitter implements IRaftNode {
         return this.ledgers.get(namespace)! as DistributedLedger<T>;
     }
     
-    public registerLedger(ledger: DistributedLedger<any>): void {
+    public registerLedger(ledger: DistributedLedger<unknown>): void {
         this.ledgers.set(ledger.namespace, ledger);
     }
 }

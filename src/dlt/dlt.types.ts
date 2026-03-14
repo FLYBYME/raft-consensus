@@ -1,5 +1,4 @@
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export interface Transaction<T = any> {
+export interface Transaction<T = unknown> {
     txID: string;
     prevTxID: string | null;
     term: number;
@@ -9,8 +8,7 @@ export interface Transaction<T = any> {
     payload: T;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export interface LedgerEntry<T = any> {
+export interface LedgerEntry<T = unknown> {
     term: number;
     timestamp?: number;
     nodeID?: string;

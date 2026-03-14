@@ -23,6 +23,9 @@ export interface IRaftNode {
     votesReceived: Set<string>;
     isReadyEmitted: boolean;
 
+    start(): Promise<void>;
+    stop(): Promise<void>;
+
     getPeers(): string[];
     persistState(): void;
     stepDown(term: number): void;
@@ -30,5 +33,7 @@ export interface IRaftNode {
     applyCommitted(): Promise<void>;
     
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    emit(event: string, ...args: any[]): boolean;
+    emit(event: string | symbol, ...args: any[]): boolean;
+    on(event: string | symbol, fn: (...args: any[]) => void, context?: any): this;
+    off(event: string | symbol, fn?: (...args: any[]) => void, context?: any, once?: boolean): this;
 }

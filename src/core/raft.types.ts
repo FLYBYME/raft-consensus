@@ -9,8 +9,7 @@ export interface LogEntry {
     term: number;
     index: number;
     namespace: string;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    payload: any;
+    payload: unknown;
 }
 
 export interface RequestVoteArgs {

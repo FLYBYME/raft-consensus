@@ -45,23 +45,24 @@ export class RaftLog {
 
     public async getEntry(index: number): Promise<LogEntry | null> {
         if (index === 0) return null;
-        const row = await this.provider.get('SELECT * FROM raft_log WHERE [index] = ?', [index]) as any;
+        const row = await this.provider.get('SELECT * FROM raft_log WHERE [index] = ?', [index]) as Record<string, unknown>;
         if (!row) return null;
         let payload = row.payload;
         if (typeof payload === 'string') {
             try { payload = JSON.parse(payload); } catch (e) { }
         }
-        return { ...row, payload };
+        return { ...row, payload } as unknown as LogEntry;
     }
 
     public async getEntriesFrom(startIndex: number): Promise<LogEntry[]> {
         const rows = await this.provider.all('SELECT * FROM raft_log WHERE [index] >= ? ORDER BY [index] ASC', [startIndex]);
-        return rows.map((r: any) => {
-            let payload = r.payload;
+        return rows.map((r: unknown) => {
+            const row = r as Record<string, unknown>;
+            let payload = row.payload;
             if (typeof payload === 'string') {
                 try { payload = JSON.parse(payload); } catch (e) { }
             }
-            return { ...r, payload };
+            return { ...row, payload } as unknown as LogEntry;
         });
     }
 
@@ -70,7 +71,7 @@ export class RaftLog {
     }
 
     public async getLastLogIndex(): Promise<number> {
-        const row = await this.provider.get('SELECT MAX([index]) as lastIndex FROM raft_log') as any;
+        const row = await this.provider.get('SELECT MAX([index]) as lastIndex FROM raft_log') as { lastIndex: number } | null;
         const lastIndex = row && row.lastIndex ? row.lastIndex : 0;
         
         if (lastIndex === 0) {
@@ -115,16 +116,19 @@ export class RaftLog {
         // Keep only the last 2 snapshots
         const snapshots = await this.provider.all('SELECT id FROM raft_snapshots ORDER BY last_index DESC');
         if (snapshots.length > 2) {
-            const toDelete = snapshots.slice(2).map(s => s.id);
+            const toDelete = snapshots.slice(2).map(s => (s as { id: number }).id);
             await this.provider.run(`DELETE FROM raft_snapshots WHERE id IN (${toDelete.join(',')})`);
         }
     }
 
-    public async getLatestSnapshot(): Promise<any> {
-        const row = await this.provider.get('SELECT * FROM raft_snapshots ORDER BY last_index DESC LIMIT 1');
-        if (row && typeof row.data === 'string') {
-            row.data = JSON.parse(row.data);
+    public async getLatestSnapshot(): Promise<{ last_index: number, last_term: number, data: any } | null> {
+        const row = await this.provider.get('SELECT * FROM raft_snapshots ORDER BY last_index DESC LIMIT 1') as { last_index: number, last_term: number, data: string } | null;
+        if (row) {
+            return {
+                ...row,
+                data: JSON.parse(row.data)
+            };
         }
-        return row;
+        return null;
     }
 }

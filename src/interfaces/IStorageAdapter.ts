@@ -1,8 +1,7 @@
+import { IStorageResult } from './storage.types';
+
 export interface IStorageAdapter {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    run(sql: string, params?: any[]): Promise<any> | any;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    get(sql: string, params?: any[]): Promise<any> | any;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    all(sql: string, params?: any[]): Promise<any[]> | any[];
+    run(sql: string, params?: unknown[]): Promise<IStorageResult> | IStorageResult;
+    get<T = unknown>(sql: string, params?: unknown[]): Promise<T | undefined> | T | undefined;
+    all<T = unknown>(sql: string, params?: unknown[]): Promise<T[]> | T[];
 }

@@ -1,10 +1,8 @@
 export interface RaftMessage {
     topic: string;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    data: any;
+    data: unknown;
     senderNodeID: string;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    meta?: any;
+    meta?: Record<string, unknown>;
 }
 
 export interface INetworkAdapter {

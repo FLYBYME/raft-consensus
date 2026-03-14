@@ -56,7 +56,7 @@ describe('RaftNode', () => {
     });
 
     test('should load persisted state on start', async () => {
-        mockStorage.get.mockResolvedValueOnce({ current_term: 5, voted_for: 'node-2' });
+        (mockStorage.get as any).mockResolvedValueOnce({ current_term: 5, voted_for: 'node-2' });
         await node.start();
         expect(node.currentTerm).toBe(5);
         expect(node.votedFor).toBe('node-2');

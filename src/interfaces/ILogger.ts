@@ -1,12 +1,7 @@
 export interface ILogger {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    debug(msg: string, ...args: any[]): void;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    info(msg: string, ...args: any[]): void;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    warn(msg: string, ...args: any[]): void;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    error(msg: string, ...args: any[]): void;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    child(context: Record<string, any>): ILogger;
+    debug(msg: string, ...args: unknown[]): void;
+    info(msg: string, ...args: unknown[]): void;
+    warn(msg: string, ...args: unknown[]): void;
+    error(msg: string, ...args: unknown[]): void;
+    child(context: Record<string, unknown>): ILogger;
 }
